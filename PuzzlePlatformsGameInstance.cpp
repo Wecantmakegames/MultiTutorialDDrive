@@ -9,7 +9,6 @@
 #include "Engine/NetDriver.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSessionSettings.h"
-#include "OnlineSessionInterface.h"
 
 #include "PlatformTrigger.h"
 #include "MenuSystem/MainMenu.h"
@@ -51,6 +50,9 @@ void UPuzzlePlatformsGameInstance::Init()
 		if (SessionInterface.IsValid()) {
 			SessionInterface->OnCreateSessionCompleteDelegates.AddUObject(this, &UPuzzlePlatformsGameInstance::OnCreateSessionComplete);
 			SessionInterface->OnDestroySessionCompleteDelegates.AddUObject(this, &UPuzzlePlatformsGameInstance::OnDestroySessionComplete);
+			SessionInterface->OnFindSessionsCompleteDelegates.AddUObject(this, &UPuzzlePlatformsGameInstance::OnFindSessionsComplete);
+			SessionInterface->OnJoinSessionCompleteDelegates.AddUObject(this, &UPuzzlePlatformsGameInstance::OnJoinSessionComplete);
+
 		}
 
 	}
@@ -79,6 +81,17 @@ void UPuzzlePlatformsGameInstance::LoadMenu()
 	Menu->SetMenuInterface(this);
 }
 
+void UPuzzlePlatformsGameInstance::RefreshServerList()
+{
+	SessionSearch = MakeShareable(new FOnlineSessionSearch());
+	if (SessionSearch.IsValid())
+	{
+		//SessionSearch->bIsLanQuery = true;
+		UE_LOG(LogTemp, Warning, TEXT("Starting to find session"));
+		SessionInterface->FindSessions(0, SessionSearch.ToSharedRef());
+	}
+}
+
 void UPuzzlePlatformsGameInstance::InGameLoadMenu()
 {
 	// create menu widget using menuclass (from constructor) and add to viewport
@@ -92,11 +105,31 @@ void UPuzzlePlatformsGameInstance::InGameLoadMenu()
 	Menu->SetMenuInterface(this);
 }
 
-void UPuzzlePlatformsGameInstance::Join(const FString & Address)  // TODO need to have failsafes for invalid input
+void UPuzzlePlatformsGameInstance::Join(uint32 Index)
 {
+	if (!SessionInterface.IsValid()) return;
+	if (!SessionSearch.IsValid()) return;
+
 	if (Menu != nullptr)
 	{
 		Menu->Teardown();
+	}
+
+	SessionInterface->JoinSession(0, SESSION_NAME, SessionSearch->SearchResults[Index]);
+
+
+
+}
+
+void UPuzzlePlatformsGameInstance::OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
+{
+	if (!SessionInterface.IsValid()) return;
+
+	FString Address;
+	if (!SessionInterface->GetResolvedConnectString(SessionName, Address))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Could not get connect string."));
+		return;
 	}
 
 	UEngine* Engine = GetEngine();
@@ -139,6 +172,9 @@ void UPuzzlePlatformsGameInstance::CreateSession()
 	if (SessionInterface.IsValid())
 	{
 		FOnlineSessionSettings SessionSettings;
+		SessionSettings.bIsLANMatch = true;
+		SessionSettings.NumPublicConnections = 2;
+		SessionSettings.bShouldAdvertise = true;
 		SessionInterface->CreateSession(0, SESSION_NAME, SessionSettings);
 	}
 }
@@ -169,6 +205,25 @@ void UPuzzlePlatformsGameInstance::OnCreateSessionComplete(FName SessionName, bo
 	}
 
 	World->ServerTravel("/Game/ThirdPersonCPP/Maps/ThirdPersonExampleMap?listen");
+}
+
+void UPuzzlePlatformsGameInstance::OnFindSessionsComplete(bool Success)
+{
+
+
+	if (Success && SessionSearch.IsValid() && Menu != nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Finished finding session"));
+
+		TArray<FString> ServerNames;
+		for (const FOnlineSessionSearchResult& SearchResult : SessionSearch->SearchResults)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Found session name: %s"), *SearchResult.GetSessionIdStr());
+			ServerNames.Add(SearchResult.GetSessionIdStr());
+		}
+
+		Menu->SetServerList(ServerNames);
+	}
 }
 
 void UPuzzlePlatformsGameInstance::Quit()
